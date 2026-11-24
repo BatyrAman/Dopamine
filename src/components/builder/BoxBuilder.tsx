@@ -2,7 +2,8 @@
  * Box builder V2 — Figma frames:
  *   "V2 · Desktop · Box Builder", "V2 · Desktop · Review & Checkout",
  *   "V2 · Mobile · Box Builder", "V2 · Mobile · Bottom sheet", "V2 · Mobile · Review & Checkout".
- * Flow: Кімге → Өлшем → Заттар → Ашықхат → Тексеру.
+ * Flow: Кімге → Өлшем → Заттар → Ашықхат → Тексеру (contacts, date, delivery → WhatsApp).
+ * Business rules live in src/lib (pricing, promo, order) — this file only renders them.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button } from "../Button";
@@ -11,17 +12,11 @@ import {
   DISTRICTS,
   FILTERS,
   ITEMS,
-  PICKUP,
   PREPAY_SHARE,
-  PROMO,
   RECIPIENTS,
   SIZES,
-  formatTenge,
-  quoteCourierDelivery,
   toneSoft,
   toneSolid,
-  type DeliveryMethod,
-  type DeliveryQuote,
   type District,
   type Filter,
   type Item,
@@ -29,10 +24,16 @@ import {
   type SizeId,
   type Tone,
 } from "./data";
+import { DELIVERY_COST_NOTE, DELIVERY_DATE_NOTE, buildOrderMessage, buildWhatsAppUrl, isOrderValid, validateOrder, type DeliveryMethod, type OrderDraft, type OrderField } from "../../lib/order";
+import { calculatePricing, formatTenge } from "../../lib/pricing";
+import { PROMO_TEXT, isPromoEligible } from "../../lib/promo";
+import { addDays, todayCalendarDate } from "../../lib/dates";
+import { WHATSAPP_PHONE_DISPLAY } from "../../config";
 
 const STEPS = ["Кімге", "Өлшем", "Заттар", "Ашықхат", "Тексеру"] as const;
 const MESSAGE_LIMIT = 200;
-const WHATSAPP_NUMBER = ""; // TODO: business WhatsApp number, e.g. "77000000000"
+/** How far ahead a delivery date may be picked. */
+const MAX_DAYS_AHEAD = 90;
 
 type Cart = Record<string, number>;
 
@@ -47,43 +48,56 @@ function useBuilder() {
   const [cart, setCart] = useState<Cart>({});
   const [message, setMessage] = useState("");
   const [from, setFrom] = useState("");
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [deliveryDate, setDeliveryDate] = useState("");
   const [method, setMethod] = useState<DeliveryMethod>("courier");
   const [district, setDistrict] = useState<District>("Бостандық");
   const [street, setStreet] = useState("");
   const [receiver, setReceiver] = useState("");
-  const [phone, setPhone] = useState("");
-  const [quote, setQuote] = useState<DeliveryQuote | null>(null);
-  const [quoting, setQuoting] = useState(false);
+  const [receiverPhone, setReceiverPhone] = useState("");
+  const [attempted, setAttempted] = useState(false);
+  const [fallbackUrl, setFallbackUrl] = useState<string | null>(null);
+  const [invalidSubmits, setInvalidSubmits] = useState(0);
 
+  // after a failed submit, move focus to the first invalid field (rendered by now)
+  useEffect(() => {
+    if (!invalidSubmits) return;
+    const el = document.querySelector<HTMLElement>("#constructor [aria-invalid='true']");
+    el?.focus({ preventScroll: true });
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [invalidSubmits]);
+
+  const today = todayCalendarDate();
   const size = SIZES.find((s) => s.id === sizeId) ?? null;
   const lines = ITEMS.filter((i) => cart[i.id]).map((i) => ({ item: i, qty: cart[i.id] }));
-  const count = lines.reduce((s, l) => s + l.qty, 0);
-  const itemsTotal = lines.reduce((s, l) => s + l.qty * l.item.price, 0);
-  const packaging = size?.packaging ?? 0;
-  const discount = PROMO.active ? Math.round(itemsTotal * PROMO.rate) : 0;
-  const delivery: DeliveryQuote | null = method === "pickup" ? PICKUP : quote;
-  const total = itemsTotal + packaging - discount + (delivery?.price ?? 0);
+  const promoEligible = isPromoEligible(today, deliveryDate || null);
+  const pricing = calculatePricing(
+    lines.map((l) => ({ price: l.item.price, qty: l.qty })),
+    size?.packaging ?? 0,
+    promoEligible,
+  );
+  const count = pricing.itemCount;
 
-  // Courier price is quoted only after an address is entered.
-  useEffect(() => {
-    if (method !== "courier") return;
-    setQuote(null);
-    if (!street.trim()) return;
-    let alive = true;
-    setQuoting(true);
-    const t = setTimeout(async () => {
-      const q = await quoteCourierDelivery(district, street);
-      if (alive) {
-        setQuote(q);
-        setQuoting(false);
-      }
-    }, 500);
-    return () => {
-      alive = false;
-      clearTimeout(t);
-      setQuoting(false);
-    };
-  }, [method, district, street]);
+  const draft: OrderDraft = {
+    recipientTitle: RECIPIENTS.find((r) => r.id === recipient)?.title ?? null,
+    size: size && { title: size.title, min: size.min, max: size.max },
+    lines: lines.map((l) => ({ name: l.item.name, price: l.item.price, qty: l.qty })),
+    customerName,
+    customerPhone,
+    deliveryDate,
+    method,
+    district,
+    street,
+    receiverName: receiver,
+    receiverPhone,
+    message,
+    from,
+  };
+  const errors = validateOrder(draft, today);
+  const orderValid = isOrderValid(errors);
+  /** Field errors are shown only after the first submit attempt. */
+  const fieldError = (f: OrderField) => (attempted ? errors[f] : undefined);
 
   const max = size?.max ?? 0;
   const min = size?.min ?? 0;
@@ -122,20 +136,36 @@ function useBuilder() {
     });
   };
 
+  /** Validates and opens WhatsApp with the order. Never opens it for an invalid order. */
+  const submit = () => {
+    setAttempted(true);
+    setFallbackUrl(null);
+    if (!orderValid) {
+      setInvalidSubmits((n) => n + 1);
+      return;
+    }
+    const url = buildWhatsAppUrl(buildOrderMessage(draft, pricing));
+    const win = window.open(url, "_blank");
+    if (win) win.opener = null;
+    else setFallbackUrl(url); // pop-up blocked → show a direct link
+  };
+
   const valid = [
     recipient !== null,
     size !== null,
     size !== null && count >= min,
     true, // postcard text is optional
-    delivery !== null && (method === "pickup" || (street.trim() !== "" && receiver.trim() !== "" && phone.trim() !== "")),
+    orderValid,
   ];
   const canOpen = (i: number) => valid.slice(0, i).every(Boolean);
 
   return {
     step, setStep, recipient, setRecipient, size, chooseSize, cart, lines, count, min, max,
     add, dec, remove, message, setMessage, from, setFrom,
-    method, setMethod, district, setDistrict, street, setStreet, receiver, setReceiver, phone, setPhone,
-    quote, quoting, delivery, itemsTotal, packaging, discount, total, valid, canOpen,
+    customerName, setCustomerName, customerPhone, setCustomerPhone, deliveryDate, setDeliveryDate,
+    method, setMethod, district, setDistrict, street, setStreet, receiver, setReceiver, receiverPhone, setReceiverPhone,
+    today, promoEligible, pricing, itemsTotal: pricing.itemsTotal, packaging: pricing.packaging, discount: pricing.discount, total: pricing.total,
+    errors, attempted, fieldError, submit, fallbackUrl, valid, canOpen,
   };
 }
 type B = ReturnType<typeof useBuilder>;
@@ -233,23 +263,34 @@ function PriceRow({ label, value, tone = "default" }: { label: string; value: st
   );
 }
 
+function PromoNote({ eligible }: { eligible: boolean }) {
+  return eligible ? (
+    <p className="flex items-center gap-xs rounded-sm bg-mint-soft px-sm py-xs font-body text-small font-semibold text-ink" role="status">
+      <Icon name="check" className="size-4 shrink-0 text-mint" />
+      {PROMO_TEXT.eligible}
+    </p>
+  ) : (
+    <p className="flex items-start gap-xs font-body text-small text-ink-muted" role="status">
+      <Icon name="info" className="mt-[2px] size-4 shrink-0" />
+      {PROMO_TEXT.notEligible}
+    </p>
+  );
+}
+
 function PriceBreakdown({ b }: { b: B }) {
   return (
     <div className="flex flex-col gap-sm">
       <PriceRow label={`Заттар (${b.count})`} value={formatTenge(b.itemsTotal)} />
       <PriceRow label="Сыйлық орамы" value={b.size ? formatTenge(b.packaging) : "Өлшемді таңда"} tone={b.size ? "default" : "pending"} />
-      {b.discount > 0 && <PriceRow label={PROMO.label} value={formatTenge(-b.discount)} tone="discount" />}
-      {b.delivery ? (
-        <PriceRow label={`Жеткізу · ${b.delivery.provider}`} value={b.delivery.price ? formatTenge(b.delivery.price) : "Тегін"} />
-      ) : (
-        <PriceRow label="Жеткізу" value={b.quoting ? "Есептеліп жатыр…" : "Мекенжай бойынша есептеледі"} tone="pending" />
-      )}
+      <PriceRow label="Жеңілдік (10%)" value={b.discount > 0 ? formatTenge(-b.discount) : "—"} tone={b.discount > 0 ? "discount" : "pending"} />
+      <PriceRow label="Жеткізу" value="Нақтыланады" tone="pending" />
       <hr className="border-border" />
       <div className="flex items-center justify-between">
         <span className="font-body text-body-lg font-bold text-ink">Барлығы</span>
         <span className="font-display text-h3 font-extrabold text-primary">{formatTenge(b.total)}</span>
       </div>
-      {!b.delivery && <p className="font-body text-small text-ink-muted">+ жеткізу (мекенжайды енгізгеннен кейін)</p>}
+      <p className="font-body text-small text-ink-muted">+ жеткізу (нақтыланады). {DELIVERY_COST_NOTE}.</p>
+      {b.size && <PromoNote eligible={b.promoEligible} />}
     </div>
   );
 }
@@ -274,24 +315,13 @@ function nextAction(b: B): { label: string; disabled: boolean; go: () => void; h
     case 3:
       return { label: "Боксты тексеру", disabled: false, go };
     default:
-      return { label: `Тапсырысты растау · ${formatTenge(b.total)}`, disabled: !b.valid[4], go: () => confirmOrder(b), hint: b.valid[4] ? undefined : "Жеткізу мәліметтерін толтыр" };
+      return {
+        label: "WhatsApp арқылы тапсырыс беру",
+        disabled: false,
+        go: b.submit,
+        hint: b.attempted && !b.valid[4] ? "Белгіленген өрістерді толтыр" : `Тапсырыс ${WHATSAPP_PHONE_DISPLAY} нөміріне WhatsApp арқылы жіберіледі`,
+      };
   }
-}
-
-function confirmOrder(b: B) {
-  const rec = RECIPIENTS.find((r) => r.id === b.recipient)?.title ?? "";
-  const lines = [
-    `Дофамин — тапсырыс`,
-    `${rec} · ${b.size?.title} бокс`,
-    ...b.lines.map((l) => `• ${l.item.name} × ${l.qty} — ${formatTenge(l.item.price * l.qty)}`),
-    `Орау: ${formatTenge(b.packaging)}`,
-    b.discount ? `${PROMO.label}: ${formatTenge(-b.discount)}` : "",
-    `Жеткізу: ${b.delivery?.provider} — ${b.delivery?.price ? formatTenge(b.delivery.price) : "тегін"}`,
-    b.method === "courier" ? `Мекенжай: Алматы, ${b.district}, ${b.street}; алушы ${b.receiver}, ${b.phone}` : "",
-    b.message ? `Ашықхат: «${b.message}»${b.from ? ` — ${b.from}` : ""}` : "",
-    `Барлығы: ${formatTenge(b.total)}`,
-  ].filter(Boolean);
-  window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(lines.join("\n"))}`, "_blank", "noopener");
 }
 
 function Summary({ b, onClose }: { b: B; onClose?: () => void }) {
@@ -380,7 +410,7 @@ function Stepper({ b }: { b: B }) {
   return (
     <nav aria-label="Бокс жинау қадамдары" className="w-full">
       {/* desktop */}
-      <ol className="hidden items-center gap-xs md:flex">
+      <ol className="hidden items-center gap-xs lg:flex">
         {STEPS.map((s, i) => {
           const done = i < b.step && b.valid[i];
           const current = i === b.step;
@@ -410,7 +440,7 @@ function Stepper({ b }: { b: B }) {
         })}
       </ol>
       {/* mobile */}
-      <div className="flex flex-col gap-xs md:hidden">
+      <div className="flex flex-col gap-xs lg:hidden">
         <p className="font-body text-small font-semibold text-primary">
           Қадам {b.step + 1} / {STEPS.length} · {STEPS[b.step]}
         </p>
@@ -707,21 +737,52 @@ function StepReview({ b }: { b: B }) {
         </ReviewCard>
       </div>
 
+      <ReviewCard title="Байланыс">
+        <div className="grid grid-cols-1 gap-sm md:grid-cols-2">
+          <Field label="Атыңыз" required error={b.fieldError("customerName")}>
+            {(p) => <input {...p} value={b.customerName} onChange={(e) => b.setCustomerName(e.target.value)} autoComplete="name" placeholder="Айдана" />}
+          </Field>
+          <Field label="Телефон (WhatsApp)" required error={b.fieldError("customerPhone")}>
+            {(p) => (
+              <input {...p} value={b.customerPhone} onChange={(e) => b.setCustomerPhone(e.target.value)} type="tel" inputMode="tel" autoComplete="tel" placeholder="+7 7__ ___ __ __" />
+            )}
+          </Field>
+        </div>
+      </ReviewCard>
+
       <ReviewCard title="Жеткізу">
+        <div className="flex flex-col gap-xs">
+          <Field label="Жеткізу күні" required error={b.fieldError("deliveryDate")}>
+            {(p) => (
+              <input
+                {...p}
+                type="date"
+                value={b.deliveryDate}
+                min={b.today}
+                max={addDays(b.today, MAX_DAYS_AHEAD)}
+                onChange={(e) => b.setDeliveryDate(e.target.value)}
+                className={`${p.className} md:max-w-[280px]`}
+              />
+            )}
+          </Field>
+          <PromoNote eligible={b.promoEligible} />
+          <p className="font-body text-small text-ink-muted">{DELIVERY_DATE_NOTE}.</p>
+        </div>
+
         <fieldset className="grid grid-cols-1 gap-sm md:grid-cols-2">
-          <legend className="sr-only">Жеткізу тәсілі</legend>
+          <legend className="mb-xs font-body text-small font-semibold text-ink-muted">Алу тәсілі</legend>
           {(["courier", "pickup"] as const).map((m) => {
             const sel = b.method === m;
-            const price = m === "pickup" ? "Тегін" : b.quote ? formatTenge(b.quote.price) : b.quoting ? "…" : "Мекенжай бойынша";
             return (
               <label key={m} className={`flex cursor-pointer items-center gap-sm rounded-md p-md ${sel ? "bg-primary-soft outline-2 -outline-offset-2 outline-primary" : "bg-surface outline-1 -outline-offset-1 outline-border"}`}>
                 <input type="radio" name="delivery" checked={sel} onChange={() => b.setMethod(m)} className="size-5 accent-primary" />
                 <Icon name={m === "courier" ? "truck" : "pin"} className={`size-5 shrink-0 ${sel ? "text-primary" : "text-ink"}`} />
                 <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="font-body text-body font-semibold text-ink">{m === "courier" ? "Курьер · Yandex Go" : "Өзім алып кетемін"}</span>
-                  <span className="font-body text-small text-ink-muted">{m === "courier" ? (b.quote ? b.quote.window : "Мекенжайды енгіз") : PICKUP.window}</span>
+                  <span className="font-body text-body font-semibold text-ink">{m === "courier" ? "Курьер" : "Өзім алып кетемін"}</span>
+                  <span className="font-body text-small text-ink-muted">
+                    {m === "courier" ? "Алматы бойынша · құны кейін нақтыланады" : "Алу орны мен уақыты WhatsApp арқылы келісіледі"}
+                  </span>
                 </span>
-                <span className={`text-right font-body text-small font-bold ${sel ? "text-primary" : "text-ink"}`}>{price}</span>
               </label>
             );
           })}
@@ -729,41 +790,79 @@ function StepReview({ b }: { b: B }) {
 
         {b.method === "courier" && (
           <div className="grid grid-cols-1 gap-sm md:grid-cols-2">
-            <label className="flex flex-col gap-xs">
-              <span className="font-body text-small font-semibold text-ink-muted">Аудан (Алматы)</span>
-              <select value={b.district} onChange={(e) => b.setDistrict(e.target.value as District)} className={inputCls}>
-                {DISTRICTS.map((d) => (
-                  <option key={d}>{d}</option>
-                ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-xs">
-              <span className="font-body text-small font-semibold text-ink-muted">Көше, үй, пәтер</span>
-              <input value={b.street} onChange={(e) => b.setStreet(e.target.value)} placeholder="Абай даңғылы 150, 24-пәтер" className={inputCls} />
-            </label>
-            <label className="flex flex-col gap-xs">
-              <span className="font-body text-small font-semibold text-ink-muted">Алушының аты</span>
-              <input value={b.receiver} onChange={(e) => b.setReceiver(e.target.value)} placeholder="Ерлан" className={inputCls} />
-            </label>
-            <label className="flex flex-col gap-xs">
-              <span className="font-body text-small font-semibold text-ink-muted">Алушының телефоны</span>
-              <input value={b.phone} onChange={(e) => b.setPhone(e.target.value)} type="tel" inputMode="tel" placeholder="+7 7__ ___ __ __" className={inputCls} />
-            </label>
+            <Field label="Аудан (Алматы)">
+              {(p) => (
+                <select {...p} value={b.district} onChange={(e) => b.setDistrict(e.target.value as District)}>
+                  {DISTRICTS.map((d) => (
+                    <option key={d}>{d}</option>
+                  ))}
+                </select>
+              )}
+            </Field>
+            <Field label="Көше, үй, пәтер" required error={b.fieldError("street")}>
+              {(p) => <input {...p} value={b.street} onChange={(e) => b.setStreet(e.target.value)} autoComplete="street-address" placeholder="Абай даңғылы 150, 24-пәтер" />}
+            </Field>
+            <Field label="Алушының аты (басқа адам болса)">
+              {(p) => <input {...p} value={b.receiver} onChange={(e) => b.setReceiver(e.target.value)} placeholder="Ерлан" />}
+            </Field>
+            <Field label="Алушының телефоны (басқа адам болса)" error={b.fieldError("receiverPhone")}>
+              {(p) => (
+                <input {...p} value={b.receiverPhone} onChange={(e) => b.setReceiverPhone(e.target.value)} type="tel" inputMode="tel" placeholder="+7 7__ ___ __ __" />
+              )}
+            </Field>
           </div>
         )}
         <p className="flex items-center gap-xs font-body text-small text-ink-muted">
           <Icon name="info" className="size-4 shrink-0" />
-          {b.method === "pickup"
-            ? "Алматы, дүкеннен алып кетесің — жеткізу тегін"
-            : b.quote
-              ? "Курьер бағасы осы мекенжай бойынша есептелді"
-              : "Курьер бағасы мекенжайды енгізгеннен кейін есептеледі"}
+          {DELIVERY_COST_NOTE}
         </p>
       </ReviewCard>
 
+      {b.fieldError("box") && (
+        <p role="alert" className="rounded-md border border-primary bg-primary-soft px-md py-sm font-body text-small font-semibold text-ink">
+          {b.fieldError("box")}
+        </p>
+      )}
+
+      {b.fallbackUrl && (
+        <div role="alert" className="flex flex-col gap-xs rounded-md border border-primary bg-primary-soft px-md py-sm font-body text-small text-ink">
+          <span className="font-semibold">WhatsApp ашылмады — браузер жаңа терезені бөгеп тастаған болуы мүмкін.</span>
+          <a href={b.fallbackUrl} target="_blank" rel="noreferrer" className="font-semibold text-primary underline">
+            Тапсырысты WhatsApp-қа жіберу
+          </a>
+        </div>
+      )}
+
       <p className="rounded-md bg-sun-soft px-md py-sm font-body text-small text-ink">
-        Төлем: Kaspi QR не аударым · алдын ала {Math.round(PREPAY_SHARE * 100)}% — {formatTenge(Math.round(b.total * PREPAY_SHARE))}. Төлемнен кейін заттарды сатып алып, жинаймыз.
+        Төлем: Kaspi QR не аударым · алдын ала {Math.round(PREPAY_SHARE * 100)}% — {formatTenge(Math.round(b.total * PREPAY_SHARE))} (жеткізусіз). Төлемнен кейін заттарды сатып алып, жинаймыз.
       </p>
+    </div>
+  );
+}
+
+type FieldControlProps = { id: string; className: string; "aria-invalid": boolean; "aria-describedby"?: string; required?: boolean };
+
+/** Labelled form control with validation message (Figma input style). */
+function Field({ label, required, error, children }: { label: string; required?: boolean; error?: string; children: (p: FieldControlProps) => ReactNode }) {
+  const id = `f-${label.replace(/[^\p{L}\p{N}]+/gu, "-")}`;
+  return (
+    <div className="flex flex-col gap-xs">
+      <label htmlFor={id} className="font-body text-small font-semibold text-ink-muted">
+        {label}
+        {required && <span className="text-primary"> *</span>}
+      </label>
+      {children({
+        id,
+        required,
+        "aria-invalid": !!error,
+        "aria-describedby": error ? `${id}-err` : undefined,
+        className: `${inputCls} ${error ? "border-primary bg-primary-soft/40" : ""}`,
+      })}
+      {error && (
+        <span id={`${id}-err`} className="font-body text-small font-semibold text-primary">
+          {error}
+        </span>
+      )}
     </div>
   );
 }
@@ -859,7 +958,7 @@ export default function BoxBuilder() {
             </span>
             <span className="flex items-baseline gap-1">
               <span className="font-display text-[20px] font-extrabold text-ink">{formatTenge(b.total)}</span>
-              {!b.delivery && <span className="font-body text-small text-ink-muted">+ жеткізу</span>}
+              <span className="font-body text-small text-ink-muted">+ жеткізу (нақтыланады)</span>
             </span>
           </button>
           <Button onClick={() => setSheet(true)}>

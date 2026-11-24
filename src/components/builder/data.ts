@@ -39,46 +39,12 @@ export const ITEMS: Item[] = [
   { id: "keychain", name: "Брелок", price: 800, tone: "violet", tags: ["Ойындар"] },
 ];
 
-/** Pre-order campaign from the marketing plan (2 weeks before a holiday). Applies to items only. */
-export const PROMO = { active: true, label: "Алдын ала тапсырыс −10%", rate: 0.1 };
-
 /** Share paid upfront (plan: «кемі 50%»). */
 export const PREPAY_SHARE = 0.5;
 
-export type DeliveryMethod = "courier" | "pickup";
-export type DeliveryQuote = { price: number; window: string; provider: string };
-
+/** Almaty districts — used only to structure the courier address (no prices attached). */
 export const DISTRICTS = ["Алмалы", "Әуезов", "Бостандық", "Жетісу", "Медеу", "Наурызбай", "Түрксіб", "Алатау"] as const;
 export type District = (typeof DISTRICTS)[number];
-
-/**
- * TODO: DEMO estimates only — replace with a real Yandex Go / inDrive quote.
- * Kept inside the plan's range (~1 500–2 500 ₸, paid by the client).
- */
-const DEMO_COURIER_ESTIMATE: Record<District, number> = {
-  Алмалы: 1500,
-  Әуезов: 1700,
-  Бостандық: 1600,
-  Жетісу: 1800,
-  Медеу: 1900,
-  Наурызбай: 2500,
-  Түрксіб: 2100,
-  Алатау: 2400,
-};
-
-/**
- * Courier price depends on the address, so the UI never shows a price
- * until this resolves; before that it says «Мекенжай бойынша есептеледі».
- */
-export async function quoteCourierDelivery(district: District, street: string): Promise<DeliveryQuote | null> {
-  if (!street.trim()) return null;
-  await new Promise((r) => setTimeout(r, 400)); // simulate network
-  return { price: DEMO_COURIER_ESTIMATE[district], window: "Ертең · 18:00–21:00", provider: "Курьер · Yandex Go" };
-}
-
-export const PICKUP: DeliveryQuote = { price: 0, window: "Ертең 12:00-ден бастап", provider: "Өзім алып кетемін" };
-
-export const formatTenge = (n: number) => `${n < 0 ? "−" : ""}${Math.abs(n).toLocaleString("ru-RU").replace(/ /g, " ")} ₸`;
 
 export const toneSoft: Record<Tone, string> = {
   primary: "bg-primary-soft",

@@ -8,6 +8,8 @@
 import type { ReactNode } from "react";
 import { Button } from "./Button";
 import BoxBuilder from "./builder/BoxBuilder";
+import { WHATSAPP_PHONE_DISPLAY, WHATSAPP_URL } from "../config";
+import { buildWhatsAppUrl } from "../lib/order";
 
 import iconBook from "../assets/figma/icon-book.svg";
 import iconCake from "../assets/figma/icon-cake.svg";
@@ -144,7 +146,7 @@ function Header() {
       </nav>
       <div className="flex items-center gap-sm">
         <span className="hidden sm:contents">
-          <Button variant="Secondary" href="https://wa.me/">
+          <Button variant="Secondary" href={WHATSAPP_URL}>
             WhatsApp
           </Button>
         </span>
@@ -219,7 +221,7 @@ function Hero() {
           {[
             ["5–12 мың ₸", "бір бокстың бағасы"],
             ["20–30 мин", "бір бокс жинау"],
-            ["1–2 сағ", "Алматы бойынша жеткізу"],
+            ["−10%", "жеткізуден 7 күн бұрын тапсырыс берсең"],
           ].map(([v, l]) => (
             <div key={l} className="flex flex-col gap-1">
               <dt className="order-2 font-body text-small text-ink-muted">{l}</dt>
@@ -237,7 +239,7 @@ function Benefits() {
   const list: { icon: string; bg: string; title: string; text: string }[] = [
     { icon: iconHand, bg: "bg-primary-soft", title: "Өзің таңдайсың", text: "Каталогтан кез келген зат" },
     { icon: iconMail, bg: "bg-violet-soft", title: "Қазақша ашықхат", text: "Жылы сөзіңді біз жазамыз" },
-    { icon: iconTruck, bg: "bg-mint-soft", title: "Алматы бойынша", text: "Yandex Go / inDrive курьер" },
+    { icon: iconTruck, bg: "bg-mint-soft", title: "Алматы бойынша", text: "Курьер немесе өзің алып кету" },
     { icon: iconQr, bg: "bg-sun-soft", title: "Kaspi QR", text: "Аударым немесе QR арқылы" },
   ];
   return (
@@ -339,7 +341,7 @@ function HitBoxes() {
             </div>
             <div className="mt-auto flex items-center justify-between px-sm pb-sm">
               <span className="font-display text-h3 font-extrabold text-primary">{h.price}</span>
-              <Button variant="Dark" href="https://wa.me/">
+              <Button variant="Dark" href={buildWhatsAppUrl(`Сәлеметсіз бе! «${h.name}» хит-боксына тапсырыс бергім келеді.`)}>
                 Тапсырыс
               </Button>
             </div>
@@ -357,20 +359,20 @@ function Promo() {
         <div className="flex flex-1 flex-col gap-md">
           <p className="font-body text-small font-bold text-sun uppercase">Жаңа жыл · 14 ақпан · 8 наурыз · Наурыз</p>
           <h2 className="max-w-[640px] font-display text-[32px] leading-[1.15] font-extrabold text-on-primary md:text-h2">
-            2 апта бұрын алдын ала тапсырыс — −10%
+            Жеткізу күнінен 7 күн бұрын тапсырыс бер — −10%
           </h2>
           <p className="max-w-[600px] font-body text-body-lg leading-[1.5] text-on-primary">
             Әр бокста QR және «келесі тапсырысқа 500 ₸» карточкасы. Мереке күндеріңді жазып аламыз — алдын ала еске саламыз.
           </p>
           <div>
-            <Button variant="Secondary" href="https://wa.me/">
-              Алдын ала тапсырыс
+            <Button variant="Secondary" href="#constructor">
+              Бокс жинау
             </Button>
           </div>
         </div>
         <div className="flex size-[220px] shrink-0 -rotate-8 flex-col items-center justify-center rounded-pill bg-sun">
           <span className="font-display text-[56px] font-extrabold text-ink">−10%</span>
-          <span className="font-body text-body font-semibold text-ink">алдын ала</span>
+          <span className="font-body text-body font-semibold text-ink">7 күн бұрын</span>
         </div>
       </div>
     </section>
@@ -381,7 +383,7 @@ function Footer() {
   const cols: { title: string; links: string[] }[] = [
     { title: "Сатып алу", links: ["Санаттар", "Конструктор", "Хит-бокстар", "Корпоративтік бокс"] },
     { title: "Ақпарат", links: ["Жеткізу және төлем", "Қайтару", "Жиі қойылатын сұрақтар"] },
-    { title: "Байланыс", links: ["WhatsApp: +7 (700) 000-00-00", "Instagram · TikTok · Threads", "Алматы"] },
+    { title: "Байланыс", links: [`WhatsApp: ${WHATSAPP_PHONE_DISPLAY}`, "Instagram · TikTok · Threads", "Алматы"] },
   ];
   return (
     <footer id="footer" className="flex w-full flex-col gap-2xl bg-ink px-md py-2xl lg:px-page-x lg:py-3xl">
@@ -394,7 +396,7 @@ function Footer() {
           <div key={c.title} className="flex flex-col gap-sm">
             <p className="font-body text-body font-bold text-on-primary">{c.title}</p>
             {c.links.map((l) => (
-              <a key={l} href="#" className="font-body text-body text-border hover:text-on-primary">
+              <a key={l} href={l.startsWith("WhatsApp") ? WHATSAPP_URL : "#"} className="font-body text-body text-border hover:text-on-primary">
                 {l}
               </a>
             ))}
