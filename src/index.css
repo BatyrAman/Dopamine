@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens — generated from Figma variables (collection "Dopamine Tokens",
+ * file 36acSalggxTnUvYD5C4Rhv) via get_variable_defs. Keep in sync with Figma.
+ */
+@theme {
+  /* color/* */
+  --color-bg: #fff7f0;
+  --color-surface: #ffffff;
+  --color-ink: #1f1235;
+  --color-ink-muted: #6b5f80;
+  --color-border: #f0e4da;
+  --color-on-primary: #ffffff;
+  --color-primary: #ff3d7f;
+  --color-primary-soft: #ffe0eb;
+  --color-sun: #ffc93c;
+  --color-sun-soft: #fff1c7;
+  --color-violet: #7b5cff;
+  --color-violet-soft: #ece6ff;
+  --color-mint: #2fcb98;
+  --color-mint-soft: #d9f7ec;
+  --color-sky: #3ba8ff;
+  --color-sky-soft: #ddf0ff;
+
+  /* space/* */
+  --spacing-xs: 8px;
+  --spacing-sm: 12px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-2xl: 48px;
+  --spacing-3xl: 80px;
+  --spacing-page-x: 120px;
+
+  /* radius/* */
+  --radius-sm: 12px;
+  --radius-md: 20px;
+  --radius-lg: 32px;
+  --radius-pill: 999px;
+
+  /* font/* */
+  --font-display: "Montserrat Alternates", system-ui, sans-serif;
+  --font-body: "Golos Text", system-ui, sans-serif;
+
+  /* font-size/* */
+  --text-display: 64px;
+  --text-h2: 44px;
+  --text-h3: 24px;
+  --text-body-lg: 18px;
+  --text-body: 16px;
+  --text-small: 14px;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+}
